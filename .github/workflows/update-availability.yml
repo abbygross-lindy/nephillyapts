@@ -1,0 +1,35 @@
+name: Update pricing and availability
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 11:00 UTC = 7am ET daily
+  workflow_dispatch:        # lets you run it on demand from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Scrape lindyproperty.com and rewrite the floor plan tables
+        run: node scripts/scrape-availability.mjs
+
+      - name: Commit if anything changed
+        run: |
+          git config user.name  "availability-bot"
+          git config user.email "availability-bot@users.noreply.github.com"
+          if git diff --quiet -- properties/; then
+            echo "No pricing changes today."
+          else
+            git add properties/
+            git commit -m "Update pricing and availability from Lindy Communities"
+            git push
+            echo "Pricing updated and pushed. Netlify will redeploy."
+          fi
