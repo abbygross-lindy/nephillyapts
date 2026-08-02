@@ -25,10 +25,10 @@ jobs:
         run: |
           git config user.name  "availability-bot"
           git config user.email "availability-bot@users.noreply.github.com"
-          if git diff --quiet -- properties/; then
+          if git diff --quiet -- properties/ sitemap.xml; then
             echo "No pricing changes today."
           else
-            git add properties/
+            git add properties/ sitemap.xml
             git commit -m "Update pricing and availability from Lindy Communities"
             git push
             echo "Pricing updated and pushed. Netlify will redeploy."
