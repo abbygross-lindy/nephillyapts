@@ -84,6 +84,20 @@ for (const slug of SLUGS) {
   console.log(`✓ ${slug}: ${plans.length} floor plans`);
 }
 
+// Keep the sitemap's lastmod in step with the pages we just rewrote, so Google
+// knows to recrawl. Only touches property URLs, and only ones that succeeded.
+const updated = SLUGS.filter(s => !failed.includes(s));
+if (updated.length) {
+  const iso = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  let sm = await readFile('sitemap.xml', 'utf8');
+  for (const slug of updated) {
+    const re = new RegExp(`(<loc>https://phillynortheastapts\\.com/properties/${slug}\\.html</loc><lastmod>)[^<]*`);
+    if (re.test(sm)) sm = sm.replace(re, `$1${iso}`);
+  }
+  await writeFile('sitemap.xml', sm);
+  console.log(`\nsitemap.xml lastmod set to ${iso} for ${updated.length} property page(s)`);
+}
+
 console.log('\n' + JSON.stringify(summary, null, 1));
 if (failed.length) {
   console.error(`\nFAILED: ${failed.join(', ')} — those pages keep their previous pricing.`);
