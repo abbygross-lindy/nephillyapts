@@ -52,15 +52,59 @@ function renderRows(plans, slug) {
 const stamp = () => new Date().toLocaleDateString('en-US',
   { timeZone: 'America/New_York', month: 'long', day: 'numeric', year: 'numeric' });
 
+const BROWSER_HEADERS = {
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'accept-language': 'en-US,en;q=0.9',
+};
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Lindy's site intermittently bounces automated requests (this is what caused the
+ * red runs in early August 2026 — the same code failed one morning and succeeded the
+ * next). Retry a few times with backoff instead of failing the whole run on the
+ * first bad response.
+ *
+ * Retries on: network errors, timeouts, 403, 408, 429, and any 5xx.
+ * Does NOT retry on: 404 or other 4xx, which mean the URL is genuinely wrong.
+ */
+const RETRYABLE = new Set([403, 408, 429, 500, 502, 503, 504]);
+const ATTEMPTS = 4;
+const BACKOFF_MS = [2000, 5000, 12000];   // waits between attempts
+const TIMEOUT_MS = 20000;                 // don't let one hung request eat the job
+
+async function fetchWithRetry(url, label) {
+  let lastErr;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      if (res.ok) {
+        if (attempt > 1) console.log(`  ↻ ${label}: succeeded on attempt ${attempt}`);
+        return await res.text();
+      }
+      lastErr = new Error('HTTP ' + res.status);
+      if (!RETRYABLE.has(res.status)) throw lastErr;   // permanent — stop early
+    } catch (e) {
+      lastErr = e;
+      if (e.message && e.message.startsWith('HTTP') && !RETRYABLE.has(+e.message.slice(5))) throw e;
+    }
+    if (attempt < ATTEMPTS) {
+      const wait = BACKOFF_MS[attempt - 1];
+      console.log(`  ↻ ${label}: ${lastErr.message} — retrying in ${wait / 1000}s (attempt ${attempt + 1}/${ATTEMPTS})`);
+      await sleep(wait);
+    }
+  }
+  throw new Error(`${lastErr.message} after ${ATTEMPTS} attempts`);
+}
+
 let failed = [];
 const summary = {};
 
 for (const slug of SLUGS) {
   let plans = [];
   try {
-    const res = await fetch(SRC(slug), { headers: {       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',       'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',       'accept-language': 'en-US,en;q=0.9',     } });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    plans = parse(await res.text());
+    plans = parse(await fetchWithRetry(SRC(slug), slug));
   } catch (e) {
     console.error(`✗ ${slug}: fetch/parse failed — ${e.message}`);
     failed.push(slug); continue;
